@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/hmans/beans/pkg/bean"
+	"github.com/hmans/beans/pkg/config"
 )
 
 func TestSortBeans(t *testing.T) {
@@ -280,4 +282,82 @@ func TestCompareBeansByStatusPriorityAndType(t *testing.T) {
 			t.Error("task should sort before unknown")
 		}
 	})
+}
+
+func TestListModelBuildFilter(t *testing.T) {
+	cfg := config.Default()
+	archive := cfg.ArchiveStatusNames()
+
+	t.Run("default hides archive statuses", func(t *testing.T) {
+		m := &listModel{config: cfg}
+		got := m.buildFilter()
+		if got == nil {
+			t.Fatal("expected non-nil filter when hiding archive")
+		}
+		if !reflect.DeepEqual(got.ExcludeStatus, archive) {
+			t.Errorf("ExcludeStatus = %v, want %v", got.ExcludeStatus, archive)
+		}
+		if len(got.Tags) != 0 {
+			t.Errorf("Tags = %v, want empty", got.Tags)
+		}
+	})
+
+	t.Run("show all with no tag returns nil filter", func(t *testing.T) {
+		m := &listModel{config: cfg, showAll: true}
+		if got := m.buildFilter(); got != nil {
+			t.Errorf("expected nil filter, got %+v", got)
+		}
+	})
+
+	t.Run("show all + tag filter", func(t *testing.T) {
+		m := &listModel{config: cfg, showAll: true, tagFilter: "idea"}
+		got := m.buildFilter()
+		if got == nil {
+			t.Fatal("expected non-nil filter when tag filter set")
+		}
+		if !reflect.DeepEqual(got.Tags, []string{"idea"}) {
+			t.Errorf("Tags = %v, want [idea]", got.Tags)
+		}
+		if len(got.ExcludeStatus) != 0 {
+			t.Errorf("ExcludeStatus = %v, want empty", got.ExcludeStatus)
+		}
+	})
+
+	t.Run("default + tag filter composes both", func(t *testing.T) {
+		m := &listModel{config: cfg, tagFilter: "idea"}
+		got := m.buildFilter()
+		if got == nil {
+			t.Fatal("expected non-nil filter")
+		}
+		if !reflect.DeepEqual(got.Tags, []string{"idea"}) {
+			t.Errorf("Tags = %v, want [idea]", got.Tags)
+		}
+		if !reflect.DeepEqual(got.ExcludeStatus, archive) {
+			t.Errorf("ExcludeStatus = %v, want %v", got.ExcludeStatus, archive)
+		}
+	})
+}
+
+func TestListModelBuildTitle(t *testing.T) {
+	cfg := config.Default()
+
+	tests := []struct {
+		name      string
+		tagFilter string
+		showAll   bool
+		want      string
+	}{
+		{"default", "", false, "Beans"},
+		{"showAll", "", true, "Beans [all]"},
+		{"tagOnly", "idea", false, "Beans [tag: idea]"},
+		{"tagAndShowAll", "idea", true, "Beans [tag: idea] [all]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &listModel{config: cfg, tagFilter: tt.tagFilter, showAll: tt.showAll}
+			if got := m.buildTitle(); got != tt.want {
+				t.Errorf("buildTitle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
