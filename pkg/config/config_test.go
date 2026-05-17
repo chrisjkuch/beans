@@ -184,6 +184,19 @@ func TestIsArchiveStatus(t *testing.T) {
 	}
 }
 
+func TestArchiveStatusNames(t *testing.T) {
+	got := Default().ArchiveStatusNames()
+	want := []string{"completed", "scrapped"}
+	if len(got) != len(want) {
+		t.Fatalf("ArchiveStatusNames() len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("ArchiveStatusNames()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestLoadNonExistent(t *testing.T) {
 	// Load from non-existent directory should return defaults
 	cfg, err := Load("/nonexistent/path/that/does/not/exist")
