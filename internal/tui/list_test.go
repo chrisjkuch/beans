@@ -337,17 +337,17 @@ func TestListModelBuildFilter(t *testing.T) {
 		}
 	})
 
-	t.Run("readyOnly sets IsExplicitlyBlocked=false", func(t *testing.T) {
+	t.Run("readyOnly sets IsBlocked=false", func(t *testing.T) {
 		m := &listModel{config: cfg, showAll: true, readyOnly: true}
 		got := m.buildFilter()
 		if got == nil {
 			t.Fatal("expected non-nil filter")
 		}
-		if got.IsExplicitlyBlocked == nil {
-			t.Fatal("expected IsExplicitlyBlocked to be set")
+		if got.IsBlocked == nil {
+			t.Fatal("expected IsBlocked to be set")
 		}
-		if *got.IsExplicitlyBlocked {
-			t.Errorf("IsExplicitlyBlocked = true, want false")
+		if *got.IsBlocked {
+			t.Errorf("IsBlocked = true, want false")
 		}
 	})
 
@@ -357,8 +357,8 @@ func TestListModelBuildFilter(t *testing.T) {
 		if got == nil {
 			t.Fatal("expected non-nil filter")
 		}
-		if got.IsExplicitlyBlocked == nil || *got.IsExplicitlyBlocked {
-			t.Error("expected IsExplicitlyBlocked=false")
+		if got.IsBlocked == nil || *got.IsBlocked {
+			t.Error("expected IsBlocked=false")
 		}
 		if len(got.Tags) != 1 || got.Tags[0] != "idea" {
 			t.Errorf("Tags = %v, want [idea]", got.Tags)
@@ -371,8 +371,8 @@ func TestListModelBuildFilter(t *testing.T) {
 		if got == nil {
 			t.Fatal("expected non-nil filter")
 		}
-		if got.IsExplicitlyBlocked == nil || *got.IsExplicitlyBlocked {
-			t.Error("expected IsExplicitlyBlocked=false")
+		if got.IsBlocked == nil || *got.IsBlocked {
+			t.Error("expected IsBlocked=false")
 		}
 		if !reflect.DeepEqual(got.ExcludeStatus, archive) {
 			t.Errorf("ExcludeStatus = %v, want %v", got.ExcludeStatus, archive)

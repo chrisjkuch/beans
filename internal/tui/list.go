@@ -310,7 +310,7 @@ func (m *listModel) buildFilter() *model.BeanFilter {
 	}
 	if m.readyOnly {
 		falsy := false
-		f.IsExplicitlyBlocked = &falsy
+		f.IsBlocked = &falsy
 	}
 	return f
 }
