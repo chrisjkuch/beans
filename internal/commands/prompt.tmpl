@@ -126,9 +126,11 @@ beans update <id> \
   --status completed
 ```
 
-**Multiple replacements (via GraphQL):**
+**Multiple replacements (via GraphQL):** pipe the mutation through stdin — never paste a multi-line GraphQL body inside `'...'` (the shell parser breaks on the embedded `"`, `()`, `\n`, or `'`):
+
 ```bash
-beans query 'mutation {
+cat <<'EOF' | beans query
+mutation {
   updateBean(id: "<id>", input: {
     status: "completed"
     bodyMod: {
@@ -139,12 +141,15 @@ beans query 'mutation {
       append: "## Summary\n\nAll tasks completed!"
     }
   }) { id body etag }
-}'
+}
+EOF
 ```
+
 - Replacements execute sequentially (each operates on result of previous)
 - Append applied after all replacements
 - All operations atomic with single etag validation
 - Transactional: any failure = no changes saved
+- `bodyMod.replace` is **exact-match** and case-sensitive. If `text not found in body`, fetch the current body first with `beans show <id> --body-only` and copy the `old` strings verbatim — task formats drift (e.g. `- [ ]` vs `[ ]`).
 
 ## Concurrency Control
 
@@ -180,3 +185,13 @@ beans query --json '{ beans(filter: { type: ["bug"], priority: ["critical", "hig
 # Search with text
 beans query --json '{ beans(filter: { search: "authentication" }) { id title body } }'
 ```
+
+## Common pitfalls
+
+These are the highest-frequency mistakes agents make with the beans CLI. Avoid them.
+
+- **Don't put multi-line GraphQL bodies inside `'...'`.** The shell breaks on embedded `"`, `()`, `\n`, or `'` — typical errors are `unmatched "`, `parse error near ')'`, or `Error: accepts at most 1 argument`. Pipe via stdin (see Multiple replacements above) or use `--variables '{"id":"x","body":"..."}'` with a parameterized mutation.
+- **`beans update` has no `--body-replace-old`/`--body-replace-new` flags.** Those are GraphQL `bodyMod` fields, not CLI flags. Real `beans update` body flags: `--body`, `--body-append`, `--body-file`. Run `beans update --help` rather than guessing.
+- **`BeanFilter` uses `parentId` (not `parent`), and it takes a single `String`, not `[String]`.** Check the schema with `beans query --schema | grep -A 30 'input BeanFilter'` before guessing field names.
+- **Don't guess bean IDs for `beans show`** — it errors hard on unknown IDs. List first (`beans list --json --ready`, `beans list --json -S "<keyword>"`).
+- **`beans list --json` returns a bare JSON array, not `{ "beans": [...] }`.** Pipe through `jq '.[].id'` or `python3 -c "import json,sys; [print(b['id']) for b in json.load(sys.stdin)]"` — calling `.get('beans')` on the result raises `AttributeError: 'list' object has no attribute 'get'`.
