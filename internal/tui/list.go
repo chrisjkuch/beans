@@ -23,6 +23,7 @@ type beanItem struct {
 	treePrefix      string // tree prefix for rendering (e.g., "├─" or "  └─")
 	matched         bool   // true if bean matched filter (vs. ancestor shown for context)
 	implicitStatus string // implicit terminal status from an ancestor, if any
+	blocked         bool   // true if bean has at least one active blocker
 }
 
 func (i beanItem) Title() string       { return i.bean.Title }
@@ -65,6 +66,17 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	if d.cols.ShowTags {
 		baseWidth += d.cols.Tags
 	}
+	// Reserve space for trailing annotations rendered by RenderBeanRow after
+	// the title. These are only shown when the row isn't dimmed, matching the
+	// gate in styles.go.
+	if item.matched {
+		if item.implicitStatus != "" {
+			baseWidth += len([]rune(" ↑")) + len(item.implicitStatus)
+		}
+		if item.blocked {
+			baseWidth += len([]rune(" ⊘"))
+		}
+	}
 	maxTitleWidth := max(0, m.Width()-baseWidth)
 
 	// Check if bean is marked for multi-select
@@ -97,6 +109,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 			IDColWidth:      d.idColWidth,
 			UseFullNames:    d.cols.UseFullTypeStatus,
 			ImplicitStatus: item.implicitStatus,
+			Blocked:         item.blocked,
 		},
 	)
 
@@ -120,6 +133,7 @@ type listModel struct {
 	// Active filters
 	tagFilter string // if set, only show beans with this tag
 	showAll   bool   // if false (default), hide archive-status beans (e.g. completed, scrapped)
+	readyOnly bool   // if true, hide beans that are explicitly blocked
 
 	// Multi-select state
 	selectedBeans map[string]bool // IDs of beans marked for multi-edit
@@ -199,8 +213,23 @@ func (m listModel) loadBeans() tea.Msg {
 		}
 	}
 
+	// Pre-compute active blocker IDs per bean for sibling reordering and the
+	// blocked annotation.
+	activeBlockers := make(map[string][]string, len(allBeans))
+	for _, b := range allBeans {
+		blockers := m.resolver.Core.FindActiveBlockers(b.ID)
+		if len(blockers) == 0 {
+			continue
+		}
+		ids := make([]string, len(blockers))
+		for i, blk := range blockers {
+			ids[i] = blk.ID
+		}
+		activeBlockers[b.ID] = ids
+	}
+
 	// Build tree and flatten it
-	tree := ui.BuildTree(filteredBeans, allBeans, sortFn, implicitStatuses)
+	tree := ui.BuildTree(filteredBeans, allBeans, sortFn, implicitStatuses, activeBlockers)
 	items := ui.FlattenTree(tree)
 
 	// Calculate ID column width based on max ID length and tree depth
@@ -225,8 +254,8 @@ func (m *listModel) setTagFilter(tag string) {
 	m.tagFilter = tag
 }
 
-// clearFilter clears the user-controlled filters (tag filter).
-// Does not affect showAll, which is a separate visibility toggle.
+// clearFilter clears the user-controlled tag filter.
+// Does not affect showAll or readyOnly, which are separate visibility toggles.
 func (m *listModel) clearFilter() {
 	m.tagFilter = ""
 }
@@ -241,6 +270,11 @@ func (m *listModel) toggleShowAll() {
 	m.showAll = !m.showAll
 }
 
+// toggleReadyOnly toggles whether explicitly-blocked beans are hidden.
+func (m *listModel) toggleReadyOnly() {
+	m.readyOnly = !m.readyOnly
+}
+
 // buildTitle builds the list title with active-filter indicators.
 func (m *listModel) buildTitle() string {
 	var parts []string
@@ -249,6 +283,9 @@ func (m *listModel) buildTitle() string {
 	}
 	if m.showAll {
 		parts = append(parts, "all")
+	}
+	if m.readyOnly {
+		parts = append(parts, "ready")
 	}
 	if len(parts) == 0 {
 		return "Beans"
@@ -261,7 +298,7 @@ func (m *listModel) buildTitle() string {
 func (m *listModel) buildFilter() *model.BeanFilter {
 	hasTag := m.tagFilter != ""
 	hideArchive := !m.showAll
-	if !hasTag && !hideArchive {
+	if !hasTag && !hideArchive && !m.readyOnly {
 		return nil
 	}
 	f := &model.BeanFilter{}
@@ -270,6 +307,10 @@ func (m *listModel) buildFilter() *model.BeanFilter {
 	}
 	if hideArchive {
 		f.ExcludeStatus = m.config.ArchiveStatusNames()
+	}
+	if m.readyOnly {
+		falsy := false
+		f.IsBlocked = &falsy
 	}
 	return f
 }
@@ -302,6 +343,7 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 				treePrefix:      flatItem.TreePrefix,
 				matched:         flatItem.Matched,
 				implicitStatus: flatItem.ImplicitStatus,
+				blocked:         flatItem.Blocked,
 			}
 			if len(flatItem.Bean.Tags) > 0 {
 				m.hasTags = true
@@ -460,6 +502,10 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 				return m, func() tea.Msg {
 					return openCreateModalMsg{}
 				}
+			case "r":
+				// Toggle "ready only" — hide explicitly-blocked beans
+				m.toggleReadyOnly()
+				return m, m.loadBeans
 			case "e":
 				// Open editor for selected bean
 				if item, ok := m.list.SelectedItem().(beanItem); ok {
@@ -571,6 +617,12 @@ func (m listModel) Footer() string {
 		aLabel = "hide done"
 	}
 
+	// "r" key label flips based on current state
+	rLabel := "ready only"
+	if m.readyOnly {
+		rLabel = "show blocked"
+	}
+
 	// Show selection count if any beans are selected
 	var selectionPrefix string
 	if len(m.selectedBeans) > 0 {
@@ -597,6 +649,7 @@ func (m listModel) Footer() string {
 			helpKeyStyle.Render("e") + " " + helpStyle.Render("edit") + "  " +
 			helpKeyStyle.Render("p") + " " + helpStyle.Render("parent") + "  " +
 			helpKeyStyle.Render("P") + " " + helpStyle.Render("priority") + "  " +
+			helpKeyStyle.Render("r") + " " + helpStyle.Render(rLabel) + "  " +
 			helpKeyStyle.Render("s") + " " + helpStyle.Render("status") + "  " +
 			helpKeyStyle.Render("t") + " " + helpStyle.Render("type") + "  " +
 			helpKeyStyle.Render("y") + " " + helpStyle.Render("copy id") + "  " +
@@ -612,6 +665,7 @@ func (m listModel) Footer() string {
 			helpKeyStyle.Render("e") + " " + helpStyle.Render("edit") + "  " +
 			helpKeyStyle.Render("p") + " " + helpStyle.Render("parent") + "  " +
 			helpKeyStyle.Render("P") + " " + helpStyle.Render("priority") + "  " +
+			helpKeyStyle.Render("r") + " " + helpStyle.Render(rLabel) + "  " +
 			helpKeyStyle.Render("s") + " " + helpStyle.Render("status") + "  " +
 			helpKeyStyle.Render("t") + " " + helpStyle.Render("type") + "  " +
 			helpKeyStyle.Render("y") + " " + helpStyle.Render("copy id") + "  " +

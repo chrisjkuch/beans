@@ -336,6 +336,48 @@ func TestListModelBuildFilter(t *testing.T) {
 			t.Errorf("ExcludeStatus = %v, want %v", got.ExcludeStatus, archive)
 		}
 	})
+
+	t.Run("readyOnly sets IsBlocked=false", func(t *testing.T) {
+		m := &listModel{config: cfg, showAll: true, readyOnly: true}
+		got := m.buildFilter()
+		if got == nil {
+			t.Fatal("expected non-nil filter")
+		}
+		if got.IsBlocked == nil {
+			t.Fatal("expected IsBlocked to be set")
+		}
+		if *got.IsBlocked {
+			t.Errorf("IsBlocked = true, want false")
+		}
+	})
+
+	t.Run("readyOnly + tag composes", func(t *testing.T) {
+		m := &listModel{config: cfg, showAll: true, readyOnly: true, tagFilter: "idea"}
+		got := m.buildFilter()
+		if got == nil {
+			t.Fatal("expected non-nil filter")
+		}
+		if got.IsBlocked == nil || *got.IsBlocked {
+			t.Error("expected IsBlocked=false")
+		}
+		if len(got.Tags) != 1 || got.Tags[0] != "idea" {
+			t.Errorf("Tags = %v, want [idea]", got.Tags)
+		}
+	})
+
+	t.Run("readyOnly + hideArchive composes", func(t *testing.T) {
+		m := &listModel{config: cfg, readyOnly: true}
+		got := m.buildFilter()
+		if got == nil {
+			t.Fatal("expected non-nil filter")
+		}
+		if got.IsBlocked == nil || *got.IsBlocked {
+			t.Error("expected IsBlocked=false")
+		}
+		if !reflect.DeepEqual(got.ExcludeStatus, archive) {
+			t.Errorf("ExcludeStatus = %v, want %v", got.ExcludeStatus, archive)
+		}
+	})
 }
 
 func TestListModelBuildTitle(t *testing.T) {
@@ -345,16 +387,20 @@ func TestListModelBuildTitle(t *testing.T) {
 		name      string
 		tagFilter string
 		showAll   bool
+		readyOnly bool
 		want      string
 	}{
-		{"default", "", false, "Beans"},
-		{"showAll", "", true, "Beans [all]"},
-		{"tagOnly", "idea", false, "Beans [tag: idea]"},
-		{"tagAndShowAll", "idea", true, "Beans [tag: idea] [all]"},
+		{"default", "", false, false, "Beans"},
+		{"showAll", "", true, false, "Beans [all]"},
+		{"readyOnly", "", false, true, "Beans [ready]"},
+		{"tagOnly", "idea", false, false, "Beans [tag: idea]"},
+		{"tagAndShowAll", "idea", true, false, "Beans [tag: idea] [all]"},
+		{"tagAndReady", "idea", false, true, "Beans [tag: idea] [ready]"},
+		{"allThree", "idea", true, true, "Beans [tag: idea] [all] [ready]"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &listModel{config: cfg, tagFilter: tt.tagFilter, showAll: tt.showAll}
+			m := &listModel{config: cfg, tagFilter: tt.tagFilter, showAll: tt.showAll, readyOnly: tt.readyOnly}
 			if got := m.buildTitle(); got != tt.want {
 				t.Errorf("buildTitle() = %q, want %q", got, tt.want)
 			}
